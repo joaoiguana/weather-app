@@ -1,0 +1,86 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Add a service container for running the Python microservice
+      python_service:
+        image: python:3.10
+        ports:
+          - 5000:5000
+
+    steps:
+      - uses: actions/checkout@v2
+
+      # Set up Ruby
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0.0'
+          bundler-cache: true # This will cache bundle install
+
+      # Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+
+      # Install and configure PostgreSQL if your Rails app uses it
+      - name: Install PostgreSQL
+        run: |
+          sudo apt-get update
+          sudo apt-get install postgresql libpq-dev
+          sudo service postgresql start
+
+      # Set up Rails application
+      - name: Install Rails dependencies
+        working-directory: ./weather-app
+        run: |
+          gem install bundler
+          bundle install
+
+      # Set up database if needed
+      - name: Set up database
+        working-directory: ./weather-app
+        run: |
+          cp config/database.yml.github-actions config/database.yml
+          bundle exec rails db:create
+          bundle exec rails db:schema:load
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:@localhost:5432/weather_test
+
+      # Run Rails tests
+      - name: Run Rails tests
+        working-directory: ./weather-app
+        run: bundle exec rspec
+        env:
+          RAILS_ENV: test
+
+      # Set up Python application
+      - name: Install Python dependencies
+        working-directory: ./weather-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-flask requests
+
+      # Start Python service
+      - name: Start Python service
+        working-directory: ./weather-service
+        run: |
+          python app.py &
+          sleep 5  # Give the service time to start
+
+      # Run Python tests
+      - name: Run Python tests
+        working-directory: ./weather-service
+        run: python -m pytest
